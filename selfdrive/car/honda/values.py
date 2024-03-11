@@ -49,6 +49,7 @@ class CarControllerParams:
 class HondaFlags(IntFlag):
   # Bosch models with alternate set of LKAS_HUD messages
   BOSCH_EXT_HUD = 1
+  BOSCH_ALT_BRAKE = 2
 
 
 # Car button codes
@@ -96,6 +97,7 @@ class CAR(StrEnum):
   RIDGELINE = "HONDA RIDGELINE 2017"
   INSIGHT = "HONDA INSIGHT 2019"
   HONDA_E = "HONDA E 2020"
+  CLARITY = "HONDA CLARITY 2018"
 
 
 class Footnote(Enum):
@@ -152,12 +154,28 @@ CAR_INFO: Dict[str, Optional[Union[HondaCarInfo, List[HondaCarInfo]]]] = {
   CAR.RIDGELINE: HondaCarInfo("Honda Ridgeline 2017-24", min_steer_speed=12. * CV.MPH_TO_MS),
   CAR.INSIGHT: HondaCarInfo("Honda Insight 2019-22", "All", min_steer_speed=3. * CV.MPH_TO_MS),
   CAR.HONDA_E: HondaCarInfo("Honda e 2020", "All", min_steer_speed=3. * CV.MPH_TO_MS),
+  CAR.CLARITY: HondaCarInfo("Honda Clarity", min_steer_speed=12. * CV.MPH_TO_MS),
 }
 
 HONDA_VERSION_REQUEST = bytes([uds.SERVICE_TYPE.READ_DATA_BY_IDENTIFIER]) + \
   p16(0xF112)
 HONDA_VERSION_RESPONSE = bytes([uds.SERVICE_TYPE.READ_DATA_BY_IDENTIFIER + 0x40]) + \
   p16(0xF112)
+
+# diag message that in some Nidec cars only appear with 1s freq if VIN query is performed
+DIAG_MSGS = {1600: 5, 1601: 8}
+
+FINGERPRINTS = {
+  CAR.CLARITY: [{
+    57: 3, 148: 8, 228: 5, 304: 8, 312: 8, 315: 7, 330: 8, 344: 8, 380: 8, 387: 8, 388: 8, 399: 7, 409: 8, 419: 8, 420: 8, 427: 3, 428: 8, 432: 7, 441: 5, 450: 8, 464: 8, 476: 8, 478: 3, 490: 8, 506: 8, 531: 8, 533: 8, 538: 5, 545: 5, 547: 6, 559: 3, 597: 8, 662: 4, 773: 7, 777: 8, 780: 8, 795: 8, 800: 8, 804: 8, 806: 8, 808: 8, 815: 8, 829: 5, 831: 5, 832: 3, 833: 8, 856: 7, 862: 8, 884: 8, 891: 8, 892: 8, 900: 8, 901: 8, 904: 8, 905: 8, 906: 4, 923: 2, 927: 8, 929: 8, 976: 8, 983: 8, 985: 3, 1024: 5, 1027: 5, 1029: 8, 1036: 8, 1039: 8, 1070: 8, 1072: 4, 1092: 1, 1108: 8, 1113: 8, 1114: 2, 1125: 8, 1128: 8, 1129: 8, 1302: 8, 1322: 5, 1331: 8, 1332: 5, 1341: 5, 1361: 5, 1365: 5, 1424: 5, 1429: 5, 1600: 5, 1601: 8, 1604: 5, 1606: 5, 1607: 8, 1608: 5, 1609: 8, 1633: 8
+  }],
+}
+
+# add DIAG_MSGS to fingerprints
+for c in FINGERPRINTS:
+  for f, _ in enumerate(FINGERPRINTS[c]):
+    for d in DIAG_MSGS:
+      FINGERPRINTS[c][f][d] = DIAG_MSGS[d]
 
 FW_QUERY_CONFIG = FwQueryConfig(
   requests=[
@@ -195,10 +213,19 @@ FW_QUERY_CONFIG = FwQueryConfig(
       [StdQueries.UDS_VERSION_REQUEST],
       [StdQueries.UDS_VERSION_RESPONSE],
       bus=1,
-      logging=True,
       obd_multiplexing=False,
     ),
   ],
+  # We lose these ECUs without the comma power on these cars.
+  # Note that we still attempt to match with them when they are present
+  non_essential_ecus={
+    Ecu.programmedFuelInjection: [CAR.CIVIC_BOSCH, CAR.CRV_5G],
+    Ecu.transmission: [CAR.CIVIC_BOSCH, CAR.CRV_5G],
+    Ecu.vsa: [CAR.CIVIC_BOSCH, CAR.CRV_5G],
+    Ecu.combinationMeter: [CAR.CIVIC_BOSCH, CAR.CRV_5G],
+    Ecu.gateway: [CAR.CIVIC_BOSCH, CAR.CRV_5G],
+    Ecu.electricBrakeBooster: [CAR.CIVIC_BOSCH, CAR.CRV_5G],
+  },
   extra_ecus=[
     # The only other ECU on PT bus accessible by camera on radarless Civic
     (Ecu.unknown, 0x18DAB3F1, None),
@@ -230,6 +257,7 @@ DBC = {
   CAR.INSIGHT: dbc_dict('honda_insight_ex_2019_can_generated', None),
   CAR.HONDA_E: dbc_dict('acura_rdx_2020_can_generated', None),
   CAR.CIVIC_2022: dbc_dict('honda_civic_ex_2022_can_generated', None),
+  CAR.CLARITY: dbc_dict('honda_clarity_hybrid_2018_can_generated', 'acura_ilx_2016_nidec'),
 }
 
 STEER_THRESHOLD = {
@@ -243,5 +271,4 @@ HONDA_NIDEC_ALT_SCM_MESSAGES = {CAR.ACURA_ILX, CAR.ACURA_RDX, CAR.CRV, CAR.CRV_E
                                 CAR.PILOT, CAR.RIDGELINE}
 HONDA_BOSCH = {CAR.ACCORD, CAR.ACCORDH, CAR.CIVIC_BOSCH, CAR.CIVIC_BOSCH_DIESEL, CAR.CRV_5G,
                CAR.CRV_HYBRID, CAR.INSIGHT, CAR.ACURA_RDX_3G, CAR.HONDA_E, CAR.CIVIC_2022, CAR.HRV_3G}
-HONDA_BOSCH_ALT_BRAKE_SIGNAL = {CAR.ACCORD, CAR.CRV_5G, CAR.ACURA_RDX_3G, CAR.HRV_3G}
 HONDA_BOSCH_RADARLESS = {CAR.CIVIC_2022, CAR.HRV_3G}
